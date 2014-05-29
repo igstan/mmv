@@ -1,0 +1,54 @@
+#!/usr/bin/env node
+
+var fs       = require('fs');
+var path     = require('path');
+var spawn    = require('child_process').spawn;
+
+var oldNames = new Buffer(0);
+var newNames = new Buffer(0);
+var prefix   = Date.now() + '-';
+var comment  = '#';
+var sublime  = spawn('sublime');
+var find     = spawn('find', ['.', '-type', 'f']);
+
+function commentOut(buffer) {
+  return buffer.toString().trim().split('\n').map(function (line) {
+    return comment + ' ' + path.normalize(line) + '\n';
+  }).join('');
+}
+
+find.stdout.on('data', function (oldName) {
+  oldNames = Buffer.concat([oldNames, oldName]);
+
+  sublime.stdin.write(new Buffer(commentOut(oldNames)));
+  sublime.stdout.on('data', function (newName) {
+    newNames = Buffer.concat([newNames, newName]);
+  });
+});
+
+find.on('close', function (code) {
+  sublime.stdin.end();
+});
+
+sublime.on('close', function (code) {
+  var names = {};
+
+  find.stdin.end();
+  oldNames = oldNames.toString().trim().split('\n');
+  newNames = newNames.toString().trim().split('\n');
+
+  oldNames.forEach(function (oldName, i) {
+    var newName = newNames[i].trim();
+
+    if (newName !== '' && newName.indexOf(comment) !== 0) {
+      oldName = path.resolve(oldName);
+      var mangledName = path.join(path.dirname(oldName), prefix + newName);
+      names[mangledName] = path.join(path.dirname(oldName), newName);
+      fs.renameSync(oldName, mangledName);
+    }
+  });
+
+  for (name in names) {
+    fs.renameSync(name, names[name]);
+  }
+});
